@@ -23,8 +23,7 @@ func (n nodes) Len() int           { return len(n) }
 func (n nodes) Less(i, j int) bool { return n[i].Hash < n[j].Hash }
 func (n nodes) Swap(i, j int)      { n[i], n[j] = n[j], n[i] }
 
-// CRing contains the attributes related to consistent
-// hashing.
+// CRing contains the attributes related to consistent hashing
 type CRing struct {
 	parents map[string]*CNode
 	nodes   nodes
@@ -45,11 +44,10 @@ func (r *CRing) GenHash(key string) uint64 {
 	hasher.Write([]byte(key))
 	digest := hasher.Sum(nil)
 	digestAsUint64 := binary.LittleEndian.Uint64(digest)
-	return digestAsUint64 % 2141
+	return digestAsUint64
 }
 
 // AddNode adds a new node into the ring
-// todo: check if node already exist in ring
 func (r *CRing) AddNode(key string, weight int) bool {
 
 	if _, exist := r.parents[key]; exist {
@@ -69,14 +67,14 @@ func (r *CRing) AddNode(key string, weight int) bool {
 
 	seed := hash
 	for weight > 1 {
-		node := CNode{
+		seed = r.GenHash(strconv.Itoa((int)(seed)))
+		virNode := CNode{
 			Parent: hash,
 			Hash:   seed,
 			Key:    key,
 			Weight: node.Weight,
 		}
-		r.nodes = append(r.nodes, &node)
-		seed = r.GenHash(strconv.Itoa((int)(seed)))
+		r.nodes = append(r.nodes, &virNode)
 		weight--
 	}
 	sort.Sort(r.nodes)
@@ -96,6 +94,7 @@ func (r *CRing) RemoveNode(key string) {
 		}
 		walk++
 	}
+	delete(r.parents, key)
 }
 
 // GetNextParent returns the next parent in the consistent ring
@@ -105,17 +104,23 @@ func (r *CRing) GetNextParent(node *CNode) *CNode {
 		return nil
 	}
 
-	hash := r.GenHash(key)
 	walk := 0
-
 	for walk != r.nodes.Len() {
-		node := r.nodes[walk]
-		if node.Hash >= hash && node.Parent {
-			return node
+		curr := r.nodes[walk]
+		if curr.Hash >= node.Hash && curr.Parent != node.Parent {
+			return curr
 		}
 		walk++
 	}
-
+	walk = 0
+	// Otherwise get the first node in ring from other parent
+	for walk != r.nodes.Len() {
+		curr := r.nodes[walk]
+		if curr.Parent != node.Parent {
+			return curr
+		}
+		walk++
+	}
 	return nil
 }
 
@@ -135,12 +140,12 @@ func (r *CRing) GetNext(key string) *CNode {
 	walk := 0
 
 	for walk != r.nodes.Len() {
-		if r.nodes[walk].Hash >= hash {
-			return r.nodes[walk]
+		curr := r.nodes[walk]
+		if curr.Hash >= hash {
+			return curr
 		}
 		walk++
 	}
-
 	return r.nodes[0]
 }
 
@@ -149,7 +154,7 @@ func (r *CRing) Display() {
 	walk := 0
 	for walk < r.nodes.Len() {
 		node := r.nodes[walk]
-		fmt.Printf("Hash %s \t Key %s\n", node.hash, node.Key)
+		fmt.Println("Hash:", node.Hash, "\tKey:", node.Key)
 		walk++
 	}
 	fmt.Println("=====================")

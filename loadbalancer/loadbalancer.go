@@ -23,6 +23,7 @@ type loadBalancer struct {
 func New() LoadBalancer {
 	return &loadBalancer{
 		joinCh: make(chan joinEx),
+		ring:   *consistent.NewRing(),
 	}
 }
 
@@ -67,13 +68,7 @@ func (lb *loadBalancer) handleRequests() {
 }
 
 func (lb *loadBalancer) joinNode(args *rpcs.JoinArgs) rpcs.Ack {
-	node := consistent.CNode{
-		Key:    args.ID,
-		Weight: args.Weight,
-	}
-
-	hash := lb.ring.GenHash(args.ID)
-	success := lb.ring.AddNode(hash, &node)
+	success := lb.ring.AddNode(args.ID, args.Weight)
 	return rpcs.Ack{Success: success}
 }
 
@@ -92,16 +87,16 @@ func (lb *loadBalancer) assignReplicas(key string) {
 	if lb.ring.Size() == 1 {
 		return
 	}
-	hash := lb.ring.GenHash(key)
-	node := lb.ring.GetNext(key)
 
+	node := lb.ring.GetNext(key)
 	walk := 0
+
 	for walk < node.Weight {
-		parent := lb.ring.GetNextParent(hash)
-		if parent != nil {
-			fmt.Println("Replica of", hash, "is", parent.Hash)
+		replica := lb.ring.GetNextParent(node)
+		if replica != nil {
+			fmt.Println("Replica of", node.Hash, "is", replica.Hash)
 		}
-		hash = lb.ring.GenHash(hash)
+		node = lb.ring.GetNext(strconv.Itoa((int)(node.Hash)))
 		walk++
 	}
 }
