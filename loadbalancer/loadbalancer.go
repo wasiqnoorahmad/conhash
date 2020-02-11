@@ -88,15 +88,45 @@ func (lb *loadBalancer) assignReplicas(key string) {
 		return
 	}
 
-	node := lb.ring.GetNext(key)
-	walk := 0
+	var replicas []rpcs.RepNode
 
-	for walk < node.Weight {
+	node := lb.ring.GetNext(key)
+	steps := node.Weight
+	hostPort := ":" + node.Key
+
+	for steps > 0 {
 		replica := lb.ring.GetNextParent(node)
 		if replica != nil {
-			fmt.Println("Replica of", node.Hash, "is", replica.Hash)
+			// fmt.Println("Replica of", node.Hash, "is", replica.Key)
+			repNode := rpcs.RepNode{
+				Key: replica.Key,
+			}
+			replicas = append(replicas, repNode)
 		}
-		node = lb.ring.GetNext(strconv.Itoa((int)(node.Hash)))
-		walk++
+		virKey := lb.ring.GetVirKey(key, steps)
+		node = lb.ring.GetNext(virKey)
+		steps--
+	}
+
+	// Send via RPC
+	// Sending join Request to LoadBalancer
+	fmt.Println("Connecting", hostPort)
+	conn, err := rpc.DialHTTP("tcp", hostPort)
+
+	if err != nil {
+		fmt.Println("Error Connecting")
+		return
+	}
+	defer conn.Close()
+	args := rpcs.ReplicaArgs{
+		Replicas: replicas,
+	}
+	reply := rpcs.Ack{}
+	if err := conn.Call("Node.GetReplicas", &args, &reply); err != nil {
+		fmt.Println("Cannot call RPC")
+		return
+	} else if !reply.Success {
+		return
+		// return errors.New("LoadBalancer returned failure")
 	}
 }

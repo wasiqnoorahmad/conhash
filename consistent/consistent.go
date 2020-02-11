@@ -47,6 +47,15 @@ func (r *CRing) GenHash(key string) uint64 {
 	return digestAsUint64
 }
 
+// GetVirKey returns the next virtual key
+// with regards to n
+func (r *CRing) GetVirKey(key string, n int) string {
+	if n == 0 {
+		return key
+	}
+	return key + strconv.Itoa(n)
+}
+
 // AddNode adds a new node into the ring
 func (r *CRing) AddNode(key string, weight int) bool {
 
@@ -65,13 +74,13 @@ func (r *CRing) AddNode(key string, weight int) bool {
 	r.parents[key] = &node
 	r.nodes = append(r.nodes, &node)
 
-	seed := hash
 	for weight > 1 {
-		seed = r.GenHash(strconv.Itoa((int)(seed)))
+		seed := r.GetVirKey(key, weight)
+		hash := r.GenHash(seed)
 		virNode := CNode{
-			Parent: hash,
-			Hash:   seed,
-			Key:    key,
+			Parent: node.Hash,
+			Hash:   hash,
+			Key:    seed,
 			Weight: node.Weight,
 		}
 		r.nodes = append(r.nodes, &virNode)
@@ -85,11 +94,16 @@ func (r *CRing) AddNode(key string, weight int) bool {
 // RemoveNode removes a node from the ring provided its key
 // as the argument
 func (r *CRing) RemoveNode(key string) {
-	walk := 0
+	parent, exist := r.parents[key]
 
+	if !exist {
+		return
+	}
+
+	walk := 0
 	for walk != r.nodes.Len() {
 		node := r.nodes[walk]
-		if node.Key == key {
+		if node.Parent == parent.Hash {
 			r.nodes = append(r.nodes[:walk], r.nodes[walk+1:]...)
 		}
 		walk++

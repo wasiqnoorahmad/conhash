@@ -4,6 +4,7 @@ import (
 	"conhash/consistent"
 	"conhash/rpcs"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -27,6 +28,7 @@ func New(port int, id string, weight int) Node {
 		myPort: port,
 		id:     id,
 		weight: weight,
+		ring:   *consistent.NewRing(),
 	}
 }
 
@@ -48,6 +50,14 @@ func (n *node) StartNode(dst string) error {
 }
 
 func (n *node) GetStatus(args *rpcs.Ack, ack *rpcs.Ack) error {
+	return nil
+}
+
+func (n *node) GetReplicas(args *rpcs.ReplicaArgs, ack *rpcs.Ack) error {
+	for i := 0; i < len(args.Replicas); i++ {
+		fmt.Println("Replica Key", args.Replicas[i].Key)
+	}
+	*ack = rpcs.Ack{Success: true}
 	return nil
 }
 
