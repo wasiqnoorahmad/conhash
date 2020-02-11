@@ -15,13 +15,15 @@ import (
 type loadBalancer struct {
 	listener net.Listener // RPC listener of load balancer ...
 	ring     consistent.CRing
-	joinCh   chan (joinEx)
+	joinCh   chan joinEx
 }
 
 // New returns a new instance of loadbalancer but does
 // not start it
 func New() LoadBalancer {
-	return &loadBalancer{}
+	return &loadBalancer{
+		joinCh: make(chan joinEx),
+	}
 }
 
 // StartLB starts the RPC server for Loadbalancer and
@@ -46,9 +48,9 @@ func (lb *loadBalancer) Close() {
 }
 
 func (lb *loadBalancer) Join(args *rpcs.JoinArgs, reply *rpcs.Ack) error {
-	ex := joinEx{args: args, rep: make(chan *rpcs.Ack)}
+	ex := joinEx{args: args, rep: make(chan rpcs.Ack)}
 	lb.joinCh <- ex
-	reply = <-ex.rep
+	*reply = <-ex.rep
 	return nil
 }
 
@@ -57,32 +59,47 @@ func (lb *loadBalancer) handleRequests() {
 	for {
 		select {
 		case ex := <-lb.joinCh:
-			fmt.Println(ex.args.ID)
-			ex.rep <- &rpcs.Ack{Success: true}
+			ex.rep <- lb.joinNode(ex.args)
+			lb.assignReplicas(ex.args.ID)
+			lb.ring.Display()
 		}
 	}
 }
 
-// Forward is called when a request needs to be
+func (lb *loadBalancer) joinNode(args *rpcs.JoinArgs) rpcs.Ack {
+	node := consistent.CNode{
+		Key:    args.ID,
+		Weight: args.Weight,
+	}
+
+	hash := lb.ring.GenHash(args.ID)
+	success := lb.ring.AddNode(hash, &node)
+	return rpcs.Ack{Success: success}
+}
+
+// forward is called when a request needs to be
 // sent to a node in a ring
-func (lb *loadBalancer) Forward(key string) {
+func (lb *loadBalancer) forward(key string) {
 	node := lb.ring.GetNext(key)
 	if node != nil {
 		fmt.Println("Key forwarded to", node.Key)
 	}
 }
 
-// AssignReplicas returns a slice of node keys that are
+// assignReplicas returns a slice of node keys that are
 // assigned as the replica nodes
-func (lb *loadBalancer) AssignReplicas(key string) {
+func (lb *loadBalancer) assignReplicas(key string) {
+	if lb.ring.Size() == 1 {
+		return
+	}
 	hash := lb.ring.GenHash(key)
 	node := lb.ring.GetNext(key)
 
-	var walk uint16 = 0
+	walk := 0
 	for walk < node.Weight {
 		parent := lb.ring.GetNextParent(hash)
 		if parent != nil {
-			fmt.Println("Replica is", hash)
+			fmt.Println("Replica of", hash, "is", parent.Hash)
 		}
 		hash = lb.ring.GenHash(hash)
 		walk++

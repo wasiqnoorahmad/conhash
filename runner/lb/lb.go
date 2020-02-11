@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	port = flag.Int("--p", 8080, "Port number of LoadBalancer")
+	port = flag.Int("p", 8080, "Port number of LoadBalancer")
 )
 
 func createLock() error {
@@ -28,9 +28,9 @@ func main() {
 		return
 	}
 
-	if err = createLock(); err != nil {
-		return
-	}
+	// if err = createLock(); err != nil {
+	// 	return
+	// }
 
 	for {
 

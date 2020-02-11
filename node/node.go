@@ -13,6 +13,7 @@ import (
 // loadBalancer struct maintains the variables
 // required for consistent hashing
 type node struct {
+	weight   int
 	myPort   int
 	id       string
 	listener net.Listener // RPC listener of load balancer ...
@@ -21,10 +22,11 @@ type node struct {
 
 // New returns a new instance of loadbalancer but does
 // not start it
-func New(port int, id string) Node {
+func New(port int, id string, weight int) Node {
 	return &node{
 		myPort: port,
 		id:     id,
+		weight: weight,
 	}
 }
 
@@ -45,6 +47,10 @@ func (n *node) StartNode(dst string) error {
 	return nil
 }
 
+func (n *node) GetStatus(args *rpcs.Ack, ack *rpcs.Ack) error {
+	return nil
+}
+
 func (n *node) joinLB(dst string) error {
 
 	reply := rpcs.Ack{}
@@ -57,10 +63,10 @@ func (n *node) joinLB(dst string) error {
 	}
 	defer conn.Close()
 	args := rpcs.JoinArgs{
-		Port: n.myPort,
-		ID:   n.id,
+		Port:   n.myPort,
+		Weight: n.weight,
+		ID:     n.id,
 	}
-
 	if err := conn.Call("LoadBalancer.Join", &args, &reply); err != nil {
 		return err
 	} else if !reply.Success {

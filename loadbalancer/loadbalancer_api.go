@@ -29,5 +29,5 @@ type LoadBalancer interface {
 
 type joinEx struct {
 	args *rpcs.JoinArgs
-	rep  chan (*rpcs.Ack)
+	rep  chan (rpcs.Ack)
 }
