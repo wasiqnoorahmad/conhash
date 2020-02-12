@@ -54,7 +54,7 @@ func (n *node) StartNode(dst string) error {
 func (n *node) handleRequests() {
 	for {
 		select {
-			repEx 
+			repEx := 
 		}
 	}
 }
