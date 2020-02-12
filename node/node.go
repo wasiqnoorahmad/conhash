@@ -54,9 +54,18 @@ func (n *node) StartNode(dst string) error {
 func (n *node) handleRequests() {
 	for {
 		select {
-			repEx := 
+		case repEx := <-n.repCh:
+			rep := n.updateRing(repEx.args)
+			repEx.rep <- rep
 		}
 	}
+}
+
+func (n *node) updateRing(args *rpcs.ReplicaArgs) rpcs.Ack {
+	for i := 0; i < len(args.Replicas); i++ {
+		fmt.Println("Replica Key", args.Replicas[i].Key)
+	}
+	return rpcs.Ack{Success: true}
 }
 
 func (n *node) GetStatus(args *rpcs.Ack, ack *rpcs.Ack) error {
@@ -64,10 +73,12 @@ func (n *node) GetStatus(args *rpcs.Ack, ack *rpcs.Ack) error {
 }
 
 func (n *node) GetReplicas(args *rpcs.ReplicaArgs, ack *rpcs.Ack) error {
-	for i := 0; i < len(args.Replicas); i++ {
-		fmt.Println("Replica Key", args.Replicas[i].Key)
+	repEx := replicaEx{
+		args: args,
+		rep:  make(chan rpcs.Ack),
 	}
-	*ack = rpcs.Ack{Success: true}
+	n.repCh <- repEx
+	*ack = <-repEx.rep
 	return nil
 }
 
