@@ -17,8 +17,9 @@ type node struct {
 	weight   int
 	myPort   int
 	id       string
-	listener net.Listener // RPC listener of load balancer ...
+	listener net.Listener // RPC listener of node
 	ring     consistent.CRing
+	repCh    chan replicaEx
 }
 
 // New returns a new instance of loadbalancer but does
@@ -29,6 +30,7 @@ func New(port int, id string, weight int) Node {
 		id:     id,
 		weight: weight,
 		ring:   *consistent.NewRing(),
+		repCh:  make(chan replicaEx),
 	}
 }
 
@@ -42,11 +44,19 @@ func (n *node) StartNode(dst string) error {
 	rpcServer.Register(rpcs.WrapNode(n))
 	rpcServer.HandleHTTP(rpc.DefaultRPCPath, rpc.DefaultDebugPath)
 	go http.Serve(listener, nil)
-	// go lb.handleRequests()
+	go n.handleRequests()
 	if err = n.joinLB(dst); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (n *node) handleRequests() {
+	for {
+		select {
+			repEx 
+		}
+	}
 }
 
 func (n *node) GetStatus(args *rpcs.Ack, ack *rpcs.Ack) error {
