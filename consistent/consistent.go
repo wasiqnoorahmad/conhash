@@ -111,6 +111,33 @@ func (r *CRing) RemoveNode(key string) {
 	delete(r.parents, key)
 }
 
+// GetPrevParent returns the previous node in the ring
+// from other parent...
+func (r *CRing) GetPrevParent(node *CNode) *CNode {
+	if r.Size() == 1 {
+		return nil
+	}
+
+	walk := r.nodes.Len() - 1
+	for walk != -1 {
+		curr := r.nodes[walk]
+		if curr.Hash <= node.Hash && curr.Parent != node.Parent {
+			return curr
+		}
+		walk--
+	}
+
+	walk = r.nodes.Len() - 1
+	for walk != -1 {
+		curr := r.nodes[walk]
+		if curr.Parent != node.Parent {
+			return curr
+		}
+		walk--
+	}
+	return nil
+}
+
 // GetNextParent returns the next parent in the consistent ring
 func (r *CRing) GetNextParent(node *CNode) *CNode {
 

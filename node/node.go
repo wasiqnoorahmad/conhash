@@ -4,7 +4,6 @@ import (
 	"conhash/consistent"
 	"conhash/rpcs"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -63,7 +62,8 @@ func (n *node) handleRequests() {
 
 func (n *node) updateRing(args *rpcs.ReplicaArgs) rpcs.Ack {
 	for i := 0; i < len(args.Replicas); i++ {
-		fmt.Println("Replica Key", args.Replicas[i].Key)
+		n.ring.AddNode(args.Replicas[i].Key, 1)
+		// fmt.Println("Replica Key", args.Replicas[i].Key)
 	}
 	return rpcs.Ack{Success: true}
 }

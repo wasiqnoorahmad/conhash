@@ -60,10 +60,20 @@ func (lb *loadBalancer) handleRequests() {
 	for {
 		select {
 		case ex := <-lb.joinCh:
-			ex.rep <- lb.joinNode(ex.args)
+			rep := lb.joinNode(ex.args)
 			lb.assignReplicas(ex.args.ID)
+			lb.assignPrev(ex.args.ID)
 			lb.ring.Display()
+			ex.rep <- rep
 		}
+	}
+}
+
+func (lb *loadBalancer) assignPrev(key string) {
+	node := lb.ring.GetNext(key)
+	prev := lb.ring.GetPrevParent(node)
+	if prev != nil {
+		lb.assignReplicas(prev.Key)
 	}
 }
 
@@ -110,7 +120,7 @@ func (lb *loadBalancer) assignReplicas(key string) {
 
 	// Send via RPC
 	// Sending join Request to LoadBalancer
-	fmt.Println("Connecting", hostPort)
+	// fmt.Println("Connecting", hostPort)
 	conn, err := rpc.DialHTTP("tcp", hostPort)
 
 	if err != nil {
