@@ -11,10 +11,11 @@ import (
 
 // CNode represents a node on the consistent hash ring
 type CNode struct {
-	Key    string // id of the node
-	Weight int    // weight of the node
-	Parent uint64 // parent hash of the node
-	Hash   uint64 // hash of the node
+	Key       string // id of the node
+	Weight    int    // weight of the node
+	Parent    uint64 // parent hash of the node
+	ParentKey string // key of the parent node
+	Hash      uint64 // hash of the node
 }
 
 type nodes []*CNode
@@ -66,10 +67,11 @@ func (r *CRing) AddNode(key string, weight int) bool {
 	hash := r.GenHash(key)
 	// Setting the parent node
 	node := CNode{
-		Parent: hash,
-		Hash:   hash,
-		Key:    key,
-		Weight: weight,
+		ParentKey: key,
+		Parent:    hash,
+		Hash:      hash,
+		Key:       key,
+		Weight:    weight,
 	}
 	r.parents[key] = &node
 	r.nodes = append(r.nodes, &node)
@@ -78,10 +80,11 @@ func (r *CRing) AddNode(key string, weight int) bool {
 		seed := r.GetVirKey(key, weight)
 		hash := r.GenHash(seed)
 		virNode := CNode{
-			Parent: node.Hash,
-			Hash:   hash,
-			Key:    seed,
-			Weight: node.Weight,
+			ParentKey: node.Key,
+			Parent:    node.Hash,
+			Hash:      hash,
+			Key:       seed,
+			Weight:    node.Weight,
 		}
 		r.nodes = append(r.nodes, &virNode)
 		weight--

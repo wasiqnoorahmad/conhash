@@ -60,20 +60,48 @@ func (lb *loadBalancer) handleRequests() {
 	for {
 		select {
 		case ex := <-lb.joinCh:
+			// Joining Node
 			rep := lb.joinNode(ex.args)
 			lb.assignReplicas(ex.args.ID)
+			// lb.lookupKeys(ex.args.ID) ??
+
+			// Previous Node
 			lb.assignPrev(ex.args.ID)
+
+			// Next Node
+			// Delete Keys
+			lb.removeKeys(ex.args.ID)
 			lb.ring.Display()
 			ex.rep <- rep
 		}
 	}
 }
 
+func (lb *loadBalancer) removeKeys(key string) {
+	node := lb.ring.GetNext(key)
+	next := lb.ring.GetNextParent(node)
+	fmt.Println("Delete Keys from", next.ParentKey, "of node", node.Key)
+}
+
+func (lb *loadBalancer) lookupKeys(key string) {
+	node := lb.ring.GetNext(key)
+	prev := lb.ring.GetPrevParent(node)
+	next := lb.ring.GetNextParent(node)
+
+	if prev == nil || next == nil {
+		return
+	}
+
+	fmt.Println("Node", key, "lookuing up between", prev.Hash+1, "<->", node.Hash, "from", next.Key)
+
+}
+
 func (lb *loadBalancer) assignPrev(key string) {
 	node := lb.ring.GetNext(key)
 	prev := lb.ring.GetPrevParent(node)
 	if prev != nil {
-		lb.assignReplicas(prev.Key)
+		// fmt.Println("Previous Node of", node.Key, "is", prev.ParentKey)
+		lb.assignReplicas(prev.ParentKey)
 	}
 }
 
@@ -124,7 +152,7 @@ func (lb *loadBalancer) assignReplicas(key string) {
 	conn, err := rpc.DialHTTP("tcp", hostPort)
 
 	if err != nil {
-		fmt.Println("Error Connecting")
+		fmt.Println("Error Connecting", hostPort)
 		return
 	}
 	defer conn.Close()
