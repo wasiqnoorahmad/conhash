@@ -176,9 +176,9 @@ func (r *CRing) Size() int {
 // GetNext returns the next node in the consistent ring
 // after the key hash
 func (r *CRing) GetNext(key string) *CNode {
-	if r.Size() == 1 {
-		return nil
-	}
+	// if r.Size() == 1 {
+	// 	return nil
+	// }
 
 	hash := r.GenHash(key)
 	walk := 0

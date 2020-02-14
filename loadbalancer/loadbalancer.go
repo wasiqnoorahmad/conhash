@@ -79,20 +79,36 @@ func (lb *loadBalancer) handleRequests() {
 
 func (lb *loadBalancer) removeKeys(key string) {
 	node := lb.ring.GetNext(key)
-	next := lb.ring.GetNextParent(node)
-	fmt.Println("Delete Keys from", next.ParentKey, "of node", node.Key)
+
+	walk := 0
+	for walk != node.Weight {
+		node = lb.ring.GetNext(lb.ring.GetVirKey(key, walk))
+		next := lb.ring.GetNextParent(node)
+
+		if next != nil {
+			fmt.Println("Delete Keys from", next.ParentKey, "of node", node.Key)
+		}
+		walk++
+	}
+
 }
 
 func (lb *loadBalancer) lookupKeys(key string) {
 	node := lb.ring.GetNext(key)
-	prev := lb.ring.GetPrevParent(node)
-	next := lb.ring.GetNextParent(node)
 
-	if prev == nil || next == nil {
-		return
+	walk := 0
+	for walk != node.Weight {
+		node = lb.ring.GetNext(lb.ring.GetVirKey(key, walk))
+		next := lb.ring.GetNextParent(node)
+		prev := lb.ring.GetPrevParent(node)
+
+		if prev == nil || next == nil {
+			return
+		}
+
+		fmt.Println("Node", key, "looking up between", prev.Hash+1, "<->", node.Hash, "from", next.Key)
+		walk++
 	}
-
-	fmt.Println("Node", key, "lookuing up between", prev.Hash+1, "<->", node.Hash, "from", next.Key)
 
 }
 
