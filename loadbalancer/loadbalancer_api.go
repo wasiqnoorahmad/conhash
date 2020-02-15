@@ -31,3 +31,8 @@ type joinEx struct {
 	args *rpcs.JoinArgs
 	rep  chan (rpcs.Ack)
 }
+
+type requestEx struct {
+	args *rpcs.ReqArgs
+	rep  chan (rpcs.Ack)
+}

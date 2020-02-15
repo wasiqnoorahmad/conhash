@@ -63,13 +63,24 @@ func (n *node) handleRequests() {
 
 func (n *node) updateRing(args *rpcs.ReplicaArgs) rpcs.Ack {
 	for i := 0; i < len(args.Replicas); i++ {
-		n.ring.AddNode(args.Replicas[i].Key, 1)
+		nodeArgs := rpcs.JoinArgs{
+			ID:     args.Replicas[i].Key,
+			Weight: 1,
+			Port:   args.Replicas[i].Port,
+		}
+		n.ring.AddNode(&nodeArgs)
 		fmt.Println("Replica Key", args.Replicas[i].Key)
 	}
 	return rpcs.Ack{Success: true}
 }
 
-func (n *node) GetStatus(args *rpcs.Ack, ack *rpcs.Ack) error {
+func (n *node) GetStatus(args *rpcs.Ack, reply *rpcs.Ack) error {
+	return nil
+}
+
+func (n *node) GetRequest(args *rpcs.ReqArgs, reply *rpcs.Ack) error {
+	fmt.Println("Request rcvd", args.ID, args.NodeID)
+	*reply = rpcs.Ack{Success: true}
 	return nil
 }
 

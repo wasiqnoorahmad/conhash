@@ -7,6 +7,12 @@ type JoinArgs struct {
 	Weight int
 }
 
+// ReqArgs represents a user request
+type ReqArgs struct {
+	ID     string
+	NodeID string
+}
+
 // ReplicaArgs is used to convey all list of replica
 // to nodes to add in their ring
 type ReplicaArgs struct {

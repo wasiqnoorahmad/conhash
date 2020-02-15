@@ -1,21 +1,24 @@
 package consistent
 
 import (
+	"conhash/rpcs"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"hash"
+	"net/rpc"
 	"sort"
 	"strconv"
 )
 
 // CNode represents a node on the consistent hash ring
 type CNode struct {
-	Key       string // id of the node
-	Weight    int    // weight of the node
-	Parent    uint64 // parent hash of the node
-	ParentKey string // key of the parent node
-	Hash      uint64 // hash of the node
+	Conn      *rpc.Client // Connection to the node
+	Key       string      // id of the node
+	Weight    int         // weight of the node
+	Parent    uint64      // parent hash of the node
+	ParentKey string      // key of the parent node
+	Hash      uint64      // hash of the node
 }
 
 type nodes []*CNode
@@ -58,15 +61,25 @@ func (r *CRing) GetVirKey(key string, n int) string {
 }
 
 // AddNode adds a new node into the ring
-func (r *CRing) AddNode(key string, weight int) bool {
+func (r *CRing) AddNode(args *rpcs.JoinArgs) bool {
+	weight := args.Weight
+	key := args.ID
 
 	if _, exist := r.parents[key]; exist {
+		return false
+	}
+
+	// Try connecting the node
+	// TODO: Get IP via something else ...
+	conn, err := rpc.DialHTTP("tcp", ":"+strconv.Itoa(args.Port))
+	if err != nil {
 		return false
 	}
 
 	hash := r.GenHash(key)
 	// Setting the parent node
 	node := CNode{
+		Conn:      conn,
 		ParentKey: key,
 		Parent:    hash,
 		Hash:      hash,
@@ -75,11 +88,13 @@ func (r *CRing) AddNode(key string, weight int) bool {
 	}
 	r.parents[key] = &node
 	r.nodes = append(r.nodes, &node)
+	weight--
 
-	for weight > 1 {
+	for weight > 0 {
 		seed := r.GetVirKey(key, weight)
 		hash := r.GenHash(seed)
 		virNode := CNode{
+			Conn:      conn,
 			ParentKey: node.Key,
 			Parent:    node.Hash,
 			Hash:      hash,
@@ -124,7 +139,7 @@ func (r *CRing) GetPrevParent(node *CNode) *CNode {
 	walk := r.nodes.Len() - 1
 	for walk != -1 {
 		curr := r.nodes[walk]
-		if curr.Hash <= node.Hash && curr.Parent != node.Parent {
+		if curr.Hash < node.Hash && curr.Parent != node.Parent {
 			return curr
 		}
 		walk--
@@ -141,9 +156,18 @@ func (r *CRing) GetPrevParent(node *CNode) *CNode {
 	return nil
 }
 
+// GetNextExcept returns the next parent in the consistent ring
+// except other than they key specified
+func (r *CRing) GetNextExcept(node *CNode, key string) *CNode {
+	ret := r.GetNextParent(node)
+	for ret.ParentKey == key {
+		ret = r.GetNextParent(ret)
+	}
+	return ret
+}
+
 // GetNextParent returns the next parent in the consistent ring
 func (r *CRing) GetNextParent(node *CNode) *CNode {
-
 	if r.Size() == 1 {
 		return nil
 	}
@@ -151,7 +175,7 @@ func (r *CRing) GetNextParent(node *CNode) *CNode {
 	walk := 0
 	for walk != r.nodes.Len() {
 		curr := r.nodes[walk]
-		if curr.Hash >= node.Hash && curr.Parent != node.Parent {
+		if curr.Hash > node.Hash && curr.Parent != node.Parent {
 			return curr
 		}
 		walk++

@@ -16,6 +16,7 @@ type loadBalancer struct {
 	listener net.Listener // RPC listener of load balancer ...
 	ring     consistent.CRing
 	joinCh   chan joinEx
+	reqCh    chan requestEx
 }
 
 // New returns a new instance of loadbalancer but does
@@ -23,6 +24,7 @@ type loadBalancer struct {
 func New() LoadBalancer {
 	return &loadBalancer{
 		joinCh: make(chan joinEx),
+		reqCh:  make(chan requestEx),
 		ring:   *consistent.NewRing(),
 	}
 }
@@ -55,15 +57,22 @@ func (lb *loadBalancer) Join(args *rpcs.JoinArgs, reply *rpcs.Ack) error {
 	return nil
 }
 
+func (lb *loadBalancer) Forward(args *rpcs.ReqArgs, reply *rpcs.Ack) error {
+	ex := requestEx{args: args, rep: make(chan rpcs.Ack)}
+	lb.reqCh <- ex
+	*reply = <-ex.rep
+	return nil
+}
+
 func (lb *loadBalancer) handleRequests() {
-	fmt.Println("LB ready to serve")
+	fmt.Println("LB ready to serve...")
 	for {
 		select {
 		case ex := <-lb.joinCh:
 			// Joining Node
 			rep := lb.joinNode(ex.args)
 			lb.assignReplicas(ex.args.ID)
-			// lb.lookupKeys(ex.args.ID) ??
+			lb.lookupKeys(ex.args.ID)
 
 			// Previous Node
 			lb.assignPrev(ex.args.ID)
@@ -73,24 +82,31 @@ func (lb *loadBalancer) handleRequests() {
 			lb.removeKeys(ex.args.ID)
 			lb.ring.Display()
 			ex.rep <- rep
+
+		case ex := <-lb.reqCh:
+			ex.rep <- lb.forward(ex.args)
 		}
 	}
 }
 
 func (lb *loadBalancer) removeKeys(key string) {
+	if lb.ring.Size() <= 2 {
+		return
+	}
+
 	node := lb.ring.GetNext(key)
 
 	walk := 0
 	for walk != node.Weight {
 		node = lb.ring.GetNext(lb.ring.GetVirKey(key, walk))
-		next := lb.ring.GetNextParent(node)
+		prev := lb.ring.GetPrevParent(node)
+		next := lb.ring.GetNextExcept(node, prev.ParentKey)
 
 		if next != nil {
-			fmt.Println("Delete Keys from", next.ParentKey, "of node", node.Key)
+			fmt.Println("For", node.Key, "Delete Keys from", next.Key, "of node", prev.Key)
 		}
 		walk++
 	}
-
 }
 
 func (lb *loadBalancer) lookupKeys(key string) {
@@ -99,8 +115,8 @@ func (lb *loadBalancer) lookupKeys(key string) {
 	walk := 0
 	for walk != node.Weight {
 		node = lb.ring.GetNext(lb.ring.GetVirKey(key, walk))
-		next := lb.ring.GetNextParent(node)
 		prev := lb.ring.GetPrevParent(node)
+		next := lb.ring.GetNextParent(node)
 
 		if prev == nil || next == nil {
 			return
@@ -122,17 +138,28 @@ func (lb *loadBalancer) assignPrev(key string) {
 }
 
 func (lb *loadBalancer) joinNode(args *rpcs.JoinArgs) rpcs.Ack {
-	success := lb.ring.AddNode(args.ID, args.Weight)
+	success := lb.ring.AddNode(args)
 	return rpcs.Ack{Success: success}
 }
 
 // forward is called when a request needs to be
 // sent to a node in a ring
-func (lb *loadBalancer) forward(key string) {
-	node := lb.ring.GetNext(key)
+func (lb *loadBalancer) forward(args *rpcs.ReqArgs) rpcs.Ack {
+	node := lb.ring.GetNext(args.ID)
+
 	if node != nil {
-		fmt.Println("Key forwarded to", node.Key)
+		args.NodeID = node.Key
+		hash := lb.ring.GenHash(args.ID)
+		fmt.Println("User hash is", hash, "<->", node.Hash)
+
+		reply := rpcs.Ack{}
+		if err := node.Conn.Call("Node.GetRequest", &args, &reply); err != nil {
+			fmt.Println("Cannot call RPC")
+			return rpcs.Ack{Success: false}
+		}
+		return reply
 	}
+	return rpcs.Ack{Success: false}
 }
 
 // assignReplicas returns a slice of node keys that are
@@ -146,7 +173,6 @@ func (lb *loadBalancer) assignReplicas(key string) {
 
 	node := lb.ring.GetNext(key)
 	steps := node.Weight
-	hostPort := ":" + node.Key
 
 	for steps > 0 {
 		replica := lb.ring.GetNextParent(node)
@@ -163,20 +189,11 @@ func (lb *loadBalancer) assignReplicas(key string) {
 	}
 
 	// Send via RPC
-	// Sending join Request to LoadBalancer
-	// fmt.Println("Connecting", hostPort)
-	conn, err := rpc.DialHTTP("tcp", hostPort)
-
-	if err != nil {
-		fmt.Println("Error Connecting", hostPort)
-		return
-	}
-	defer conn.Close()
 	args := rpcs.ReplicaArgs{
 		Replicas: replicas,
 	}
 	reply := rpcs.Ack{}
-	if err := conn.Call("Node.GetReplicas", &args, &reply); err != nil {
+	if err := node.Conn.Call("Node.GetReplicas", &args, &reply); err != nil {
 		fmt.Println("Cannot call RPC")
 		return
 	} else if !reply.Success {

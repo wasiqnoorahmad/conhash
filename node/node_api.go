@@ -4,7 +4,7 @@ import (
 	"conhash/rpcs"
 )
 
-// Node is daga rora dagga pista
+// Node ...
 type Node interface {
 	StartNode(dst string) error
 
