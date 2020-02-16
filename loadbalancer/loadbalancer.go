@@ -172,20 +172,22 @@ func (lb *loadBalancer) assignReplicas(key string) {
 	var replicas []rpcs.RepNode
 
 	node := lb.ring.GetNext(key)
-	steps := node.Weight
+	walk := 0
 
-	for steps > 0 {
+	for walk != node.Weight {
+		node = lb.ring.GetNext(lb.ring.GetVirKey(key, walk))
 		replica := lb.ring.GetNextParent(node)
+
 		if replica != nil {
-			// fmt.Println("Replica of", node.Hash, "is", replica.Key)
+			fmt.Println("Replica of", node.Key, "is", replica.Key)
 			repNode := rpcs.RepNode{
-				Key: replica.Key,
+				ParentKey: replica.ParentKey,
+				Key:       replica.Key,
+				Port:      replica.Port,
 			}
 			replicas = append(replicas, repNode)
 		}
-		virKey := lb.ring.GetVirKey(key, steps)
-		node = lb.ring.GetNext(virKey)
-		steps--
+		walk++
 	}
 
 	// Send via RPC

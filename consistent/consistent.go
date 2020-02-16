@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"hash"
 	"net/rpc"
 	"sort"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 
 // CNode represents a node on the consistent hash ring
 type CNode struct {
+	Port      int
 	Conn      *rpc.Client // Connection to the node
 	Key       string      // id of the node
 	Weight    int         // weight of the node
@@ -31,14 +31,12 @@ func (n nodes) Swap(i, j int)      { n[i], n[j] = n[j], n[i] }
 type CRing struct {
 	parents map[string]*CNode
 	nodes   nodes
-	hasher  hash.Hash
 }
 
 // NewRing returns a new instance of a consistent hash ring
 func NewRing() *CRing {
 	return &CRing{
 		parents: make(map[string]*CNode),
-		hasher:  sha256.New(),
 	}
 }
 
@@ -60,6 +58,39 @@ func (r *CRing) GetVirKey(key string, n int) string {
 	return key + strconv.Itoa(n)
 }
 
+// AddSolo ...
+func (r *CRing) AddSolo(key string, parentKey string, port int) bool {
+
+	if _, exist := r.parents[key]; exist {
+		return false
+	}
+
+	hash := r.GenHash(key)
+
+	// Try connecting the node
+	// TODO: Get IP via something else ...
+	conn, err := rpc.DialHTTP("tcp", ":"+strconv.Itoa(port))
+	if err != nil {
+		return false
+	}
+
+	// Setting the parent node
+	node := CNode{
+		Port:      port,
+		Conn:      conn,
+		ParentKey: parentKey,
+		Key:       key,
+		Parent:    hash,
+		Hash:      hash,
+		Weight:    1,
+	}
+
+	r.parents[key] = &node
+	r.nodes = append(r.nodes, &node)
+	sort.Sort(r.nodes)
+	return true
+}
+
 // AddNode adds a new node into the ring
 func (r *CRing) AddNode(args *rpcs.JoinArgs) bool {
 	weight := args.Weight
@@ -79,6 +110,7 @@ func (r *CRing) AddNode(args *rpcs.JoinArgs) bool {
 	hash := r.GenHash(key)
 	// Setting the parent node
 	node := CNode{
+		Port:      args.Port,
 		Conn:      conn,
 		ParentKey: key,
 		Parent:    hash,
@@ -94,6 +126,7 @@ func (r *CRing) AddNode(args *rpcs.JoinArgs) bool {
 		seed := r.GetVirKey(key, weight)
 		hash := r.GenHash(seed)
 		virNode := CNode{
+			Port:      args.Port,
 			Conn:      conn,
 			ParentKey: node.Key,
 			Parent:    node.Hash,
@@ -200,9 +233,9 @@ func (r *CRing) Size() int {
 // GetNext returns the next node in the consistent ring
 // after the key hash
 func (r *CRing) GetNext(key string) *CNode {
-	// if r.Size() == 1 {
-	// 	return nil
-	// }
+	if r.Size() == 0 {
+		return nil
+	}
 
 	hash := r.GenHash(key)
 	walk := 0

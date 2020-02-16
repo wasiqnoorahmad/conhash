@@ -16,3 +16,8 @@ type replicaEx struct {
 	args *rpcs.ReplicaArgs
 	rep  chan rpcs.Ack
 }
+
+type requestEx struct {
+	args *rpcs.ReqArgs
+	rep  chan rpcs.Ack
+}

@@ -4,7 +4,13 @@ package rpcs
 type JoinArgs struct {
 	Port   int
 	ID     string
+	Parent string
 	Weight int
+}
+
+// LeaveArgs is called when a node is leaving network
+type LeaveArgs struct {
+	ID string
 }
 
 // ReqArgs represents a user request
@@ -23,8 +29,20 @@ type ReplicaArgs struct {
 // that is transferred to the node to convey
 // replication info
 type RepNode struct {
-	Key  string
-	Port int
+	ParentKey string
+	Key       string
+	Port      int
+}
+
+// State is a user state
+type State struct {
+	Primary string
+	Replica string
+}
+
+// SyncArgs ...
+type SyncArgs struct {
+	UserState State
 }
 
 // Ack is used to provide acknowledgments for RPCs

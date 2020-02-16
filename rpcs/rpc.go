@@ -2,9 +2,11 @@ package rpcs
 
 // RemoteNode - Students should not use this interface in their code. Use WrapNode() instead.
 type RemoteNode interface {
-	GetStatus(args *Ack, ack *Ack) error
-	GetRequest(args *ReqArgs, ack *Ack) error
-	GetReplicas(args *ReplicaArgs, ack *Ack) error
+	GetStatus(args *Ack, reply *Ack) error
+	GetRequest(args *ReqArgs, reply *Ack) error
+	GetReplicas(args *ReplicaArgs, reply *Ack) error
+	RecvState(args *SyncArgs, reply *Ack) error
+	// OnLeave
 }
 
 // RemoteLoadBalancer - Students should not use this interface in their code. Use WrapLB() instead.
