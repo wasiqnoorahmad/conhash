@@ -8,6 +8,7 @@ import (
 	"net/rpc"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 // CNode represents a node on the consistent hash ring
@@ -29,6 +30,7 @@ func (n nodes) Swap(i, j int)      { n[i], n[j] = n[j], n[i] }
 
 // CRing contains the attributes related to consistent hashing
 type CRing struct {
+	suffix  string
 	parents map[string]*CNode
 	nodes   nodes
 }
@@ -37,6 +39,7 @@ type CRing struct {
 func NewRing() *CRing {
 	return &CRing{
 		parents: make(map[string]*CNode),
+		suffix:  "-",
 	}
 }
 
@@ -55,7 +58,12 @@ func (r *CRing) GetVirKey(key string, n int) string {
 	if n == 0 {
 		return key
 	}
-	return key + strconv.Itoa(n)
+	return key + r.suffix + strconv.Itoa(n)
+}
+
+// GetParKey returns the physical key
+func (r *CRing) GetParKey(key string) string {
+	return strings.TrimSuffix(key, r.suffix)
 }
 
 // AddSolo ...
@@ -142,6 +150,25 @@ func (r *CRing) AddNode(args *rpcs.JoinArgs) bool {
 	return true
 }
 
+// RemoveSolo remove a single node from ring
+func (r *CRing) RemoveSolo(key string) bool {
+	if _, exist := r.parents[key]; !exist {
+		return false
+	}
+
+	walk := 0
+	for walk != r.nodes.Len() {
+		if r.nodes[walk].Key == key {
+			r.nodes = append(r.nodes[:walk], r.nodes[walk+1:]...)
+			break
+		}
+		walk++
+	}
+
+	delete(r.parents, key)
+	return true
+}
+
 // RemoveNode removes a node from the ring provided its key
 // as the argument
 func (r *CRing) RemoveNode(key string) {
@@ -151,14 +178,16 @@ func (r *CRing) RemoveNode(key string) {
 		return
 	}
 
-	walk := 0
-	for walk != r.nodes.Len() {
+	walk := r.nodes.Len() - 1
+	for walk >= 0 {
 		node := r.nodes[walk]
 		if node.Parent == parent.Hash {
 			r.nodes = append(r.nodes[:walk], r.nodes[walk+1:]...)
 		}
-		walk++
+		walk--
 	}
+
+	fmt.Println("Length:", r.nodes.Len())
 	delete(r.parents, key)
 }
 
@@ -197,6 +226,17 @@ func (r *CRing) GetNextExcept(node *CNode, key string) *CNode {
 		ret = r.GetNextParent(ret)
 	}
 	return ret
+}
+
+// GetNextParentWithKey returns the next parent in the consistent ring
+func (r *CRing) GetNextParentWithKey(key string) *CNode {
+	hash := r.GenHash(key)
+	node := CNode{
+		Hash:   hash,
+		Parent: r.GenHash(r.GetParKey(key)),
+	}
+	return r.GetNextParent(&node)
+
 }
 
 // GetNextParent returns the next parent in the consistent ring

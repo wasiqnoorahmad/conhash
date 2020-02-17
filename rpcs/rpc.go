@@ -6,13 +6,18 @@ type RemoteNode interface {
 	GetRequest(args *ReqArgs, reply *Ack) error
 	GetReplicas(args *ReplicaArgs, reply *Ack) error
 	RecvState(args *SyncArgs, reply *Ack) error
-	// OnLeave
+	RemoveAll(args *RemoveAll, reply *Ack) error
+	Copy(args *CopyArgs, reply *Ack) error
+	Replace(args *ReplaceArgs, reply *Ack) error
+	Lookup(args *LookupInfo, reply *Ack) error
+	CopyBulk(args *LookupInfo, reply *BulkStates) error
 }
 
 // RemoteLoadBalancer - Students should not use this interface in their code. Use WrapLB() instead.
 type RemoteLoadBalancer interface {
 	Join(args *JoinArgs, reply *Ack) error
 	Forward(args *ReqArgs, reply *Ack) error
+	Leave(args *LeaveArgs, reply *Ack) error
 }
 
 // Node ...

@@ -36,3 +36,8 @@ type requestEx struct {
 	args *rpcs.ReqArgs
 	rep  chan (rpcs.Ack)
 }
+
+type leaveEx struct {
+	args *rpcs.LeaveArgs
+	rep  chan (rpcs.Ack)
+}

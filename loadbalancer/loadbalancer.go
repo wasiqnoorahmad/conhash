@@ -17,15 +17,17 @@ type loadBalancer struct {
 	ring     consistent.CRing
 	joinCh   chan joinEx
 	reqCh    chan requestEx
+	leaveCh  chan leaveEx
 }
 
 // New returns a new instance of loadbalancer but does
 // not start it
 func New() LoadBalancer {
 	return &loadBalancer{
-		joinCh: make(chan joinEx),
-		reqCh:  make(chan requestEx),
-		ring:   *consistent.NewRing(),
+		joinCh:  make(chan joinEx),
+		reqCh:   make(chan requestEx),
+		leaveCh: make(chan leaveEx),
+		ring:    *consistent.NewRing(),
 	}
 }
 
@@ -64,6 +66,13 @@ func (lb *loadBalancer) Forward(args *rpcs.ReqArgs, reply *rpcs.Ack) error {
 	return nil
 }
 
+func (lb *loadBalancer) Leave(args *rpcs.LeaveArgs, reply *rpcs.Ack) error {
+	ex := leaveEx{args: args, rep: make(chan rpcs.Ack)}
+	lb.leaveCh <- ex
+	*reply = <-ex.rep
+	return nil
+}
+
 func (lb *loadBalancer) handleRequests() {
 	fmt.Println("LB ready to serve...")
 	for {
@@ -85,8 +94,78 @@ func (lb *loadBalancer) handleRequests() {
 
 		case ex := <-lb.reqCh:
 			ex.rep <- lb.forward(ex.args)
+
+		case ex := <-lb.leaveCh:
+			fmt.Println("Leave request received for", ex.args.ID)
+			lb.leaveNode(ex.args.ID)
+			ex.rep <- rpcs.Ack{Success: true}
+			lb.ring.Display()
 		}
 	}
+}
+
+func (lb *loadBalancer) replaceReplica(key string) {
+	node := lb.ring.GetNext(key)
+	walk := 0
+
+	for walk != node.Weight {
+		node = lb.ring.GetNext(lb.ring.GetVirKey(key, walk))
+		prev := lb.ring.GetPrevParent(node)
+		next := lb.ring.GetNextExcept(node, prev.ParentKey)
+
+		args := rpcs.ReplaceArgs{
+			Old: node.Key,
+			New: rpcs.RepNode{
+				Key:       next.Key,
+				ParentKey: next.ParentKey,
+				Port:      next.Port,
+			},
+		}
+		reply := rpcs.Ack{}
+
+		// Send via RPC
+		err := prev.Conn.Call("Node.Replace", &args, &reply)
+		if err != nil {
+			fmt.Println("Cannot Call RPC")
+			return
+		}
+
+		fmt.Println("For node", prev.Key, "replace", node.Key, "with", next.Key)
+		walk++
+	}
+}
+
+func (lb *loadBalancer) leaveNode(key string) {
+	if lb.ring.Size() <= 2 {
+		return
+	}
+
+	lb.replaceReplica(key)
+
+	node := lb.ring.GetNext(key)
+	walk := 0
+
+	for walk != node.Weight {
+		node = lb.ring.GetNext(lb.ring.GetVirKey(key, walk))
+		prev := lb.ring.GetPrevParent(node)
+
+		args := rpcs.CopyArgs{
+			Target: node.Key,
+		}
+		reply := rpcs.Ack{}
+
+		// Send via RPC
+		err := prev.Conn.Call("Node.Copy", &args, &reply)
+		if err != nil {
+			fmt.Println("Cannot Call RPC Node.Copy")
+			return
+		}
+
+		fmt.Println("For node", prev.Key, "transfer all keys with parent key =", node.Key)
+		walk++
+	}
+	// Replace Replica
+	lb.ring.RemoveNode(key)
 }
 
 func (lb *loadBalancer) removeKeys(key string) {
@@ -104,12 +183,23 @@ func (lb *loadBalancer) removeKeys(key string) {
 
 		if next != nil {
 			fmt.Println("For", node.Key, "Delete Keys from", next.Key, "of node", prev.Key)
+			// Send via RPC
+			args := rpcs.RemoveAll{
+				ID: prev.Key,
+			}
+			reply := rpcs.Ack{}
+
+			if err := next.Conn.Call("Node.RemoveAll", &args, &reply); err != nil {
+				fmt.Println("Cannot call RPC")
+			}
 		}
 		walk++
 	}
 }
 
 func (lb *loadBalancer) lookupKeys(key string) {
+	// args := rpcs.Lookup{}
+
 	node := lb.ring.GetNext(key)
 
 	walk := 0
@@ -119,6 +209,18 @@ func (lb *loadBalancer) lookupKeys(key string) {
 		next := lb.ring.GetNextParent(node)
 
 		if prev == nil || next == nil {
+			return
+		}
+		args := rpcs.LookupInfo{
+			Start: prev.Hash + 1,
+			End:   node.Hash,
+			Key:   node.Key,
+		}
+
+		// Send via RPC
+		reply := rpcs.Ack{}
+		err := node.Conn.Call("Node.Lookup", &args, &reply)
+		if err != nil {
 			return
 		}
 
@@ -200,6 +302,5 @@ func (lb *loadBalancer) assignReplicas(key string) {
 		return
 	} else if !reply.Success {
 		return
-		// return errors.New("LoadBalancer returned failure")
 	}
 }

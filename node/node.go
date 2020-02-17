@@ -14,28 +14,40 @@ import (
 // loadBalancer struct maintains the variables
 // required for consistent hashing
 type node struct {
-	unRepl   []string
-	stateMap map[string]rpcs.State
-	weight   int
-	myPort   int
-	id       string
-	listener net.Listener // RPC listener of node
-	ring     consistent.CRing
-	repCh    chan replicaEx
-	reqCh    chan requestEx
+	unRepl    []string
+	stateMap  map[string]rpcs.State
+	weight    int
+	myPort    int
+	id        string
+	listener  net.Listener // RPC listener of node
+	ring      consistent.CRing
+	repCh     chan replicaEx
+	reqCh     chan requestEx
+	rmvCh     chan removeEx
+	cpyCh     chan copyEx
+	lookupCh  chan lookupEx
+	bulkCh    chan bulkEx
+	stateCh   chan stateEx
+	replaceCh chan replaceEx
 }
 
 // New returns a new instance of loadbalancer but does
 // not start it
 func New(port int, id string, weight int) Node {
 	return &node{
-		myPort:   port,
-		id:       id,
-		ring:     *consistent.NewRing(),
-		repCh:    make(chan replicaEx),
-		reqCh:    make(chan requestEx),
-		weight:   weight,
-		stateMap: make(map[string]rpcs.State),
+		myPort:    port,
+		id:        id,
+		ring:      *consistent.NewRing(),
+		repCh:     make(chan replicaEx),
+		reqCh:     make(chan requestEx),
+		rmvCh:     make(chan removeEx),
+		cpyCh:     make(chan copyEx),
+		replaceCh: make(chan replaceEx),
+		lookupCh:  make(chan lookupEx),
+		bulkCh:    make(chan bulkEx),
+		stateCh:   make(chan stateEx),
+		weight:    weight,
+		stateMap:  make(map[string]rpcs.State),
 	}
 }
 
@@ -73,6 +85,99 @@ func (n *node) handleRequests() {
 				n.unRepl = append(n.unRepl, reqEx.args.ID)
 			}
 			reqEx.rep <- rep
+
+		case ex := <-n.stateCh:
+			fmt.Println("State replicat at backup")
+			n.stateMap[ex.args.Key] = ex.args.UserState
+			ex.rep <- rpcs.Ack{Success: true}
+
+		case rmvEx := <-n.rmvCh:
+			fmt.Println("Going to remove all keys with replica key =", rmvEx.args.ID)
+			n.removeAll(rmvEx.args.ID)
+			rmvEx.rep <- rpcs.Ack{Success: true}
+
+		case cpyEx := <-n.cpyCh:
+			fmt.Println("Copy Called")
+			n.replicateKeys(cpyEx.args.Target)
+			cpyEx.rep <- rpcs.Ack{Success: true}
+
+		case repEx := <-n.replaceCh:
+			fmt.Println("Replace Called")
+			n.replaceNodes(repEx.args)
+			repEx.rep <- rpcs.Ack{Success: true}
+
+		case lukupEx := <-n.lookupCh:
+			n.lookupKeys(lukupEx.args)
+			lukupEx.rep <- rpcs.Ack{Success: true}
+
+		case bulkEx := <-n.bulkCh:
+			bulkEx.rep <- n.cpyBulk(bulkEx.args)
+		}
+	}
+}
+
+func (n *node) cpyBulk(args *rpcs.LookupInfo) rpcs.BulkStates {
+	bulk := rpcs.BulkStates{
+		States: make(map[string]rpcs.State),
+	}
+
+	for key, state := range n.stateMap {
+		if args.Start < args.End && state.Hash >= args.Start && state.Hash <= args.End {
+			bulk.States[key] = state
+			state.Primary = args.Key
+			state.Replica = args.Dst
+		} else if args.Start > args.End && state.Hash >= args.Start || state.Hash <= args.End {
+			bulk.States[key] = state
+			state.Primary = args.Key
+			state.Replica = args.Dst
+		}
+	}
+	return bulk
+}
+
+func (n *node) lookupKeys(args *rpcs.LookupInfo) {
+	next := n.ring.GetNextParentWithKey(args.Key)
+	if next != nil {
+		bulkStates := rpcs.BulkStates{}
+		args.Dst = next.Key
+
+		err := next.Conn.Call("Node.CopyBulk", args, &bulkStates)
+		if err != nil {
+			fmt.Println("Cannot call RPC")
+			return
+		}
+		fmt.Println("States are", bulkStates)
+
+		for key, state := range bulkStates.States {
+			state.Primary = args.Key
+			state.Replica = next.Key
+			n.stateMap[key] = state
+		}
+	}
+
+}
+
+func (n *node) replaceNodes(args *rpcs.ReplaceArgs) {
+	n.ring.RemoveSolo(args.Old)
+	n.ring.AddSolo(args.New.Key, args.New.ParentKey, args.New.Port)
+
+}
+
+func (n *node) replicateKeys(target string) {
+	for key, state := range n.stateMap {
+		if state.Replica == target {
+			ok := n.replState(key)
+			if !ok {
+				n.unRepl = append(n.unRepl, key)
+			}
+		}
+	}
+}
+
+func (n *node) removeAll(key string) {
+	for _, state := range n.stateMap {
+		if state.Primary == key {
+			delete(n.stateMap, key)
 		}
 	}
 }
@@ -93,16 +198,11 @@ func (n *node) updateState(args *rpcs.ReqArgs) rpcs.Ack {
 	// Check if state already exist
 	userSt, exist := n.stateMap[args.ID]
 	if !exist {
-		// fmt.Println("Size is", n.ring.Size())
-		// replica := n.ring.GetNext(args.ID)
-		// if replica != nil {
 		userSt = rpcs.State{
-			Primary: args.NodeID,
+			Hash: n.ring.GenHash(args.ID),
 		}
-		// Replica: replica.Key,
-		// }
 	}
-	// }
+	userSt.Primary = args.NodeID
 	n.stateMap[args.ID] = userSt
 	return rpcs.Ack{Success: true}
 }
@@ -111,14 +211,19 @@ func (n *node) replState(key string) bool {
 	// Check if state already exist
 	userSt, exist := n.stateMap[key]
 	if exist {
-		fmt.Println("State Exist")
 		replica := n.ring.GetNext(key)
+
 		if replica != nil {
 			fmt.Println("Replica is", replica)
 			userSt.Replica = replica.Key
-			syncArgs := rpcs.SyncArgs{UserState: userSt}
+
+			syncArgs := rpcs.SyncArgs{
+				UserState: userSt,
+			}
 			reply := rpcs.Ack{}
+
 			err := replica.Conn.Call("Node.RecvState", &syncArgs, &reply)
+
 			if err != nil {
 				fmt.Println("Cannot call RPC")
 			} else if reply.Success {
@@ -147,9 +252,33 @@ func (n *node) GetStatus(args *rpcs.Ack, reply *rpcs.Ack) error {
 	return nil
 }
 
+func (n *node) Lookup(args *rpcs.LookupInfo, reply *rpcs.Ack) error {
+	ex := lookupEx{
+		args: args,
+		rep:  make(chan rpcs.Ack),
+	}
+	n.lookupCh <- ex
+	*reply = <-ex.rep
+	return nil
+}
+
+func (n *node) Replace(args *rpcs.ReplaceArgs, reply *rpcs.Ack) error {
+	repEx := replaceEx{
+		args: args,
+		rep:  make(chan rpcs.Ack),
+	}
+	n.replaceCh <- repEx
+	*reply = <-repEx.rep
+	return nil
+}
+
 func (n *node) RecvState(args *rpcs.SyncArgs, reply *rpcs.Ack) error {
-	fmt.Println("State Replicated")
-	*reply = rpcs.Ack{Success: true}
+	stateEx := stateEx{
+		args: args,
+		rep:  make(chan rpcs.Ack),
+	}
+	n.stateCh <- stateEx
+	*reply = <-stateEx.rep
 	return nil
 }
 
@@ -161,6 +290,36 @@ func (n *node) GetRequest(args *rpcs.ReqArgs, reply *rpcs.Ack) error {
 	n.reqCh <- reqEx
 	fmt.Println("Request rcvd", args.ID, args.NodeID)
 	*reply = <-reqEx.rep
+	return nil
+}
+
+func (n *node) CopyBulk(args *rpcs.LookupInfo, reply *rpcs.BulkStates) error {
+	blkEx := bulkEx{
+		args: args,
+		rep:  make(chan rpcs.BulkStates),
+	}
+	n.bulkCh <- blkEx
+	*reply = <-blkEx.rep
+	return nil
+}
+
+func (n *node) RemoveAll(args *rpcs.RemoveAll, reply *rpcs.Ack) error {
+	rmvEx := removeEx{
+		args: args,
+		rep:  make(chan rpcs.Ack),
+	}
+	n.rmvCh <- rmvEx
+	*reply = <-rmvEx.rep
+	return nil
+}
+
+func (n *node) Copy(args *rpcs.CopyArgs, reply *rpcs.Ack) error {
+	cpyEx := copyEx{
+		args: args,
+		rep:  make(chan rpcs.Ack),
+	}
+	n.cpyCh <- cpyEx
+	*reply = <-cpyEx.rep
 	return nil
 }
 
